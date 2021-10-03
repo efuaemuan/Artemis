@@ -1,0 +1,263 @@
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Artemis - Lunar Lander</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style type="text/css">
+    body {
+      margin: 0;
+      overflow: hidden;
+    }
+    canvas {
+      background: black;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+ <script type = "text/javascript">
+    const idealHeight = 1080;
+    const canvas = document.getElementById('canvas');
+    const context = canvas.getContext('2d');
+    const clearPadding = 1;
+    let scalingFactor = 1;
+    let paused = true;
+    let restartReadyFrom = (new Date()).getTime() + 500;
+    const restartDelay = 1000; 
+    let lastPhysicsTimestamp = 0;
+    // Game assets
+    const gravity = 1.62; //The moon's gravitational pull is 1.62 m/s/s 
+    const interfaceMargin = 25;
+    const interfaceSpacing = 125;
+    const starDensity = 0.0003;
+    const mountainDensity = 0.02;
+    const idealMountainWidth = 200;
+    const idealMountainHeight = 35;
+    const idealSurfacePosition = 1040;
+    let surfacePosition = idealSurfacePosition * scalingFactor;
+    const nativeLanderHeight = 135;
+    const nativeLanderWidth = 160;
+    const idealLanderScaling = 0.5;
+    const idealLanderHeight = nativeLanderHeight * idealLanderScaling;
+    const idealLanderWidth = nativeLanderWidth * idealLanderScaling;
+    const startLanderAltitude = 900;
+    const startLanderVelocity = 12;
+    const startLanderFuel = 100;
+    const landerThrustPower = 320;
+    const landerFuelBurnRate = 3.5;
+    const landerFuelUnitMass = 2550 / startLanderFuel;
+    const landerMassDry = 2150; // kg
+    let landerAltitude = startLanderAltitude;
+    let landerVelocity = startLanderVelocity;
+    let landerEnginesOn = false;
+    let landerFuel = startLanderFuel;
+    let landerMass = landerMassDry + (landerFuel * landerFuelUnitMass);
+    let won, lost;
+	var sound = new Audio('eaglehaslanded.mp3');
+	var explosion = new Audio('explosion.mp3');
+    var landerImage = new Image();
+    const engineImage = new Image();
+    engineImage.src = "image.svg";
+	landerImage.src = "pngegg (2).png";
+	
+// Lunar Lander image downloaded from https://www.pngegg.com/en/png-tuqov/download//
+    // Handle resizing
+    window.addEventListener('resize', handleResize);
+    handleResize();
+
+    // Handle firing of engines
+    window.addEventListener('keydown', ()=>{landerEnginesOn = true;});
+	 
+
+    window.addEventListener('keyup', ()=>{
+      if(paused && restartReadyFrom && (restartReadyFrom < (new Date()).getTime())) start();
+      landerEnginesOn = false;
+    });
+    window.addEventListener('mousedown', ()=>{landerEnginesOn = true;});
+    window.addEventListener('mouseup', ()=>{
+      if(paused && restartReadyFrom && (restartReadyFrom < (new Date()).getTime())) start();
+      landerEnginesOn = false;
+    });
+    window.addEventListener('touchstart', ()=>{landerEnginesOn = true;});
+    window.addEventListener('touchend', ()=>{
+      if(paused && restartReadyFrom && (restartReadyFrom < (new Date()).getTime())) start();
+      landerEnginesOn = false;
+    });
+
+  
+    // Starts the game!
+    function start(){
+      // Redraw all
+      handleResize();
+      // Reset physics clock
+      lastPhysicsTimestamp = 0;
+      // Reset lander attributes
+      landerAltitude = startLanderAltitude;
+      landerVelocity = startLanderVelocity;
+      landerFuel = startLanderFuel;
+      landerEnginesOn = false;
+      won = lost = restartReadyFrom = false;
+      // Unpause, if paused, to allow physics to occur
+      paused = false;
+    }
+
+    /* 160 x 135 */
+
+    // Handle resizing of the browser window
+    function handleResize(){
+      // Recalculate sizes
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      scalingFactor = canvas.height / idealHeight;
+      surfacePosition = idealSurfacePosition * scalingFactor;
+      context.strokeStyle = 'white';
+      // Clear everything
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.lineWidth = 2;
+      // Redraw stars
+      const numStars = Math.round(starDensity * canvas.width * canvas.height);
+      context.fillStyle = 'white';
+      for(let i = 0; i < numStars; i++){
+        const randX = Math.random() * canvas.width;
+        const randY = Math.random() * (idealSurfacePosition * scalingFactor);
+        context.fillRect(randX, randY, 1, 1);
+      }
+      // Redraw lunar surface
+      context.beginPath();
+      context.moveTo(0, surfacePosition);
+      context.lineTo(canvas.width, surfacePosition);
+      context.stroke();
+      // Redraw mountains
+      const numMountains = Math.floor(0.5 * canvas.width * mountainDensity);
+      context.fillStyle = 'black';
+      const excludedZoneStart = (canvas.width - (idealLanderWidth * scalingFactor)) / 2; // where NOT to draw mountains
+      const excludedZoneEnd = excludedZoneStart + (idealLanderWidth * scalingFactor);    // where NOT to draw mountains
+      let mountainCoords = [];
+      // Two passes - first pass strokes the mountains, second pass fills them (so the result is a single perceived line)
+      for(let i = 0; i < numMountains; i++){
+        const mountainLeft = (Math.random() * (canvas.width + idealMountainWidth)) - idealMountainWidth
+        const mountainCenter = mountainLeft + (Math.random() * idealMountainWidth / 2) + (idealMountainWidth / 4);
+        const mountainRight = mountainCenter + (Math.random() * idealMountainWidth / 2) + (idealMountainWidth / 4);
+        const mountainHeight = (Math.random() * (idealMountainHeight / 2 * 3)) + (idealMountainHeight / 3);
+        if(((mountainLeft < excludedZoneStart) && (mountainRight >= excludedZoneStart)) || ((mountainLeft <= excludedZoneEnd) && (mountainRight > excludedZoneEnd))) continue;
+        context.beginPath();
+        context.moveTo(mountainLeft, surfacePosition + 1);
+        context.lineTo(mountainCenter, surfacePosition - (mountainHeight * scalingFactor));
+        context.lineTo(mountainRight, surfacePosition + 1);
+        context.stroke();
+        mountainCoords.push([mountainLeft, mountainCenter, mountainRight, mountainHeight]);
+      }
+      for(let i = 0; i < mountainCoords.length; i++){
+        context.beginPath();
+        context.moveTo(mountainCoords[i][0], surfacePosition + 2);
+        context.lineTo(mountainCoords[i][1], surfacePosition - (mountainCoords[i][3] * scalingFactor));
+        context.lineTo(mountainCoords[i][2], surfacePosition + 2);
+        context.fill();
+      }
+    }
+    // Updates the positions of things based on physics
+    function physics(timestamp){
+      if(paused) return; // physics doesn't hapen when the game's paused
+
+      // Determine how long has passed since we last calculated the physics, in seconds
+      if(lastPhysicsTimestamp == 0) lastPhysicsTimestamp = timestamp; // if this is the first call, treat is as "no time has passed"
+      const timePassed = (timestamp - lastPhysicsTimestamp) / 1000;
+      lastPhysicsTimestamp = timestamp;
+
+      // Burn fuel
+      if(paused || (landerFuel <= 0)) landerEnginesOn = false;
+      if(landerEnginesOn) landerFuel -= (landerFuelBurnRate * timePassed);
+
+      // Update lander mass
+      landerMass = landerMassDry + (landerFuel * landerFuelUnitMass)
+
+      // Change lander velocity
+      const landerAccelerationDownFromGravity = gravity * timePassed;
+      const landerAccelerationUpFromThrust = (landerEnginesOn ? (landerThrustPower / landerMass) : 0);
+      landerVelocity += landerAccelerationDownFromGravity - landerAccelerationUpFromThrust;
+
+      // Move lander
+      landerAltitude -= landerVelocity * timePassed;
+
+      // If lander landed, work out if it was a success, zero altitude, and pause
+      if(landerAltitude <= 0) {
+        if(landerVelocity < 4.5) { won = true; } else { lost = true; }
+        landerAltitude = 0;
+        paused = true;
+      }
+
+      // Flag when restarting will be allowed
+      restartReadyFrom = (new Date()).getTime() + restartDelay;
+    }
+
+    // Animates a new frame
+    function animate(timestamp){
+      // Determine surface position
+      const surfacePosition = idealSurfacePosition * scalingFactor;
+      const landerWidth = idealLanderWidth * scalingFactor;
+      const screenCenter = (canvas.width - landerWidth) / 2;
+      const landerHeight = idealLanderHeight * scalingFactor;
+      const landerPosition = surfacePosition - ((landerAltitude + idealLanderHeight) * scalingFactor);
+      const pausedAtStartOfAnimateRun = paused;
+
+      if(!pausedAtStartOfAnimateRun){
+        // Clear the "column" through which the lander falls
+        context.clearRect(screenCenter - clearPadding, 0, landerWidth + (clearPadding * 2), surfacePosition - 2);
+        // Clear the interface areas
+        context.clearRect(0, surfacePosition + 1, canvas.width, (canvas.height - surfacePosition - 2));
+      }
+
+      // Do the physics simulation
+      physics(timestamp);
+
+      // Draw the current frame
+      if(!pausedAtStartOfAnimateRun){
+        // Lander
+        context.drawImage(landerImage, screenCenter, landerPosition, landerWidth, landerHeight);
+        // Engines
+        if(landerEnginesOn) context.drawImage(engineImage, screenCenter, landerPosition, landerWidth, landerHeight);
+        // Interface
+        const interfaceTextSize = Math.round((canvas.height - surfacePosition) * 0.75);
+        context.font = `${interfaceTextSize}px sans-serif`;
+        let interfacePosition = 0;
+        const interfaceElements = [
+          [`${Math.round(landerVelocity)}m/s`, (landerVelocity < 4.5 ? 'white' : 'red')],
+          [`${Math.round(landerAltitude)}m`, 'white'],
+          [`${Math.ceil((landerFuel / startLanderFuel) * 100)}%`, ((landerFuel / startLanderFuel) <= 0.2 ? 'red' : 'white')],
+          [`${Math.ceil(landerMass)}kg`, 'white'],
+          [(landerEnginesOn ? 'BURN' : ''), 'white']
+        ];
+        interfaceElements.forEach(el => {
+          context.fillStyle = el[1];
+          context.fillText(el[0], interfaceMargin + (interfaceSpacing * interfacePosition * scalingFactor), interfaceTextSize + surfacePosition);
+          interfacePosition += 1;
+        });
+      }
+      // Won or lost status display
+      const resultTextSize = Math.round(48 * scalingFactor);
+      context.font = `${resultTextSize}px sans-serif`;
+      context.fillStyle = 'white';
+      if(won) {
+		  context.fillText('You win!', (canvas.width / 2) - (95 * scalingFactor), canvas.height / 2);
+		  sound.play();
+		  sound.stop();
+      } else if(lost) {
+        context.fillText('You lose!', (canvas.width / 2) - (95 * scalingFactor), canvas.height / 2);
+      }
+      // 	Press to play display
+      context.font = `${resultTextSize * 0.75}px sans-serif`;
+      if(paused && restartReadyFrom && (restartReadyFrom < (new Date()).getTime())) {
+        context.fillText('Press to play', (canvas.width / 2) - (105 * scalingFactor), (canvas.height / 2) + (100 * scalingFactor));
+      }
+
+      // Request the next frame
+      requestAnimationFrame(animate);
+    }
+    // Request the first frame
+    requestAnimationFrame(animate);
+
+    // Start the game
+    // start();
+  </script>
+</body>
+</html>
